@@ -17,3 +17,4 @@ coverage-history.json
 
 .DS_Store
 /.venv/
+/testdata/
