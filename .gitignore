@@ -1,0 +1,19 @@
+# pycharm
+.idea
+
+# python
+venv
+__pycache__
+
+# allure
+allure-results
+allure-reports
+
+# coverage
+coverage.html
+coverage-results
+coverage-report.json
+coverage-history.json
+
+.DS_Store
+/.venv/

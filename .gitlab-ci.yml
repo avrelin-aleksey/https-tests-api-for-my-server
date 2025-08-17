@@ -1,0 +1,92 @@
+stages:
+  - test
+  - report
+  - deploy
+
+image: python:3.12
+
+variables:
+
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  ALLURE_VERSION: "2.27.0"
+  ALLURE_HOME: "$CI_PROJECT_DIR/allure"
+  ALLURE_RESULTS_DIR: "allure-results"
+  ALLURE_REPORT_DIR: "public"
+  HISTORY_DIR: "allure-history"
+
+
+  APP_HOST: "http://localhost:8000"
+  DATABASE_URL: "sqlite+aiosqlite:///./local.db"
+  JWT_ALGORITHM: "HS256"
+  JWT_SECRET_KEY: "qa-automation-engineer-api-course-secret-key"
+  JWT_ACCESS_TOKEN_EXPIRE: 1800
+  JWT_REFRESH_TOKEN_EXPIRE: 5184000
+
+cache:
+  key: allure-history
+  paths:
+    - .cache/pip
+    - allure-history
+
+test:
+  stage: test
+  services:
+    - name: redis:alpine
+      alias: redis
+  before_script:
+    - python -m pip install --upgrade pip
+    - git clone https://github.com/Nikita-Filonov/qa-automation-engineer-api-course.git
+    - pip install -r qa-automation-engineer-api-course/requirements.txt
+    - pip install -r requirements.txt
+  script:
+    - uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir ./qa-automation-engineer-api-course &
+    - pytest -m regression --alluredir=$ALLURE_RESULTS_DIR --numprocesses=2
+    - swagger-coverage-tool save-report
+  artifacts:
+    when: always
+    paths:
+      - $ALLURE_RESULTS_DIR/
+      - coverage.html
+    expire_in: 1 week
+
+generate-report:
+  stage: report
+  image: ubuntu:22.04
+  dependencies:
+    - test
+  before_script:
+    - apt-get update && apt-get install -y openjdk-17-jdk curl unzip xz-utils
+    - curl -L -o allure.tgz "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz"
+    - tar -xzf allure.tgz
+    - mv "allure-${ALLURE_VERSION}" "$ALLURE_HOME"
+    - export PATH="$ALLURE_HOME/bin:$PATH"
+  script:
+    - echo "== Восстановление предыдущей истории =="
+    - if [ -d $HISTORY_DIR ]; then echo "Восстанавливаем историю..."; cp -rv $HISTORY_DIR $ALLURE_RESULTS_DIR/history; else echo "Предыдущая история не найдена."; fi
+
+    - echo "== Генерация отчета =="
+    - mkdir -p $ALLURE_REPORT_DIR
+    - allure generate $ALLURE_RESULTS_DIR --clean -o $ALLURE_REPORT_DIR
+
+    - echo "== Сохранение новой истории =="
+    - rm -rf $HISTORY_DIR
+    - cp -rv $ALLURE_REPORT_DIR/history $HISTORY_DIR || echo "Нечего сохранять"
+
+    - echo "== Копирование отчета о покрытии =="
+    - cp coverage.html $ALLURE_REPORT_DIR/
+  artifacts:
+    paths:
+      - $ALLURE_REPORT_DIR
+    expire_in: 1 week
+
+pages:
+  stage: deploy
+  dependencies:
+    - generate-report
+  script:
+    - echo "Публикация на GitLab Pages"
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
